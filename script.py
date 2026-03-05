@@ -32,8 +32,8 @@ class Config:
     EVIDENCE_COOKIE = "Secure"
 
     # 库存导入服务配置
-    INVENTORY_BASE_URL = "127.0.0.1:9055"  # TODO: 替换为实际地址
-    INVENTORY_TOKEN= "your-inventory-api-key-here"  # TODO: 替换为实际token
+    INVENTORY_BASE_URL = "http://47.92.193.45:31880"
+    INVENTORY_TOKEN= "eyJ0eXBlIjoiSldUIiwiYWxnIjoiSFMyNTYifQ.eyJyb2xlIjoiYWRtaW4iLCJ1c2VySWQiOiIxIiwic3ViIjoiYWRtaW4iLCJpYXQiOjE3NzI2MDU3OTEsImV4cCI6MTc3Nzc4OTc5MSwibmJmIjoxNzcyNjA1NzkxfQ.8ccQ-ciUlSXudjpA2_TXC-p0zT5lezowha37fAo2YDs"
 
     # Excel模板列配置
     EXCEL_COLUMNS = [
@@ -241,7 +241,7 @@ class InventoryService:
         }
 
     def import_file(self, file_path: str) -> Optional[dict]:
-        url = f"{self.base_url}/inventory/importFile"
+        url = f"{self.base_url}/api/inventory/updateFile"
 
         # 检查文件是否存在
         if not os.path.exists(file_path):
