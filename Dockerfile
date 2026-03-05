@@ -11,6 +11,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 复制应用代码
 COPY app/ .
 
+# 复制测试数据文件
+COPY test.xlsx ./
+
 # 创建输出目录
 RUN mkdir -p ./output
 

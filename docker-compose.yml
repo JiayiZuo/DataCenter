@@ -4,7 +4,7 @@ services:
   asset-import-service:
     build: .
     container_name: asset-import-service
-    restart: unless-stopped
+#    restart: unless-stopped
     environment:
       # 区块链存证服务配置
       - EVIDENCE_BASE_URL=${EVIDENCE_BASE_URL:-http://172.22.152.154:8090}
