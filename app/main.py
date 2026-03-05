@@ -19,8 +19,9 @@ import uuid
 import hashlib
 from typing import List, Optional
 import logging
-import sys
 
+# 加载环境变量
+load_dotenv()
 
 # 配置日志
 logging.basicConfig(
@@ -33,17 +34,17 @@ logger = logging.getLogger(__name__)
 # 配置区域
 class Config:
     # 区块链存证服务配置
-    EVIDENCE_BASE_URL = os.getenv("EVIDENCE_BASE_URL", "http://172.22.152.154:8090")
-    CHAIN_ID = os.getenv("CHAIN_ID", "FELGN5IWTZB4")
+    EVIDENCE_BASE_URL = os.getenv("EVIDENCE_BASE_URL", "")
+    CHAIN_ID = os.getenv("CHAIN_ID", "")
 
     # 存证服务认证信息
-    EVIDENCE_API_KEY = os.getenv("EVIDENCE_API_KEY", "058b6995c95e45a2bcd2f189a2334ad1")
-    EVIDENCE_IDENTITY_ID = os.getenv("EVIDENCE_IDENTITY_ID", "FCAVLRLUFYTC")
-    EVIDENCE_COOKIE = os.getenv("EVIDENCE_COOKIE", "Secure")
+    EVIDENCE_API_KEY = os.getenv("EVIDENCE_API_KEY", "")
+    EVIDENCE_IDENTITY_ID = os.getenv("EVIDENCE_IDENTITY_ID", "")
+    EVIDENCE_COOKIE = os.getenv("EVIDENCE_COOKIE", "")
 
     # 库存导入服务配置
-    INVENTORY_BASE_URL = os.getenv("INVENTORY_BASE_URL", "http://47.92.193.45:31880")
-    INVENTORY_TOKEN = os.getenv("INVENTORY_TOKEN", "eyJ0eXBlIjoiSldUIiwiYWxnIjoiSFMyNTYifQ.eyJyb2xlIjoiYWRtaW4iLCJ1c2VySWQiOiIxIiwic3ViIjoiYWRtaW4iLCJpYXQiOjE3NzI2MDU3OTEsImV4cCI6MTc3Nzc4OTc5MSwibmJmIjoxNzcyNjA1NzkxfQ.8ccQ-ciUlSXudjpA2_TXC-p0zT5lezowha37fAo2YDs")
+    INVENTORY_BASE_URL = os.getenv("INVENTORY_BASE_URL", "")
+    INVENTORY_TOKEN = os.getenv("INVENTORY_TOKEN", "")
 
     # Excel模板列配置
     EXCEL_COLUMNS = [
@@ -502,9 +503,6 @@ class AssetImportWorkflow:
 
 
 def main():
-    # 加载环境变量
-    load_dotenv()
-    
     # 从命令行参数获取输入文件名，如果未提供则使用默认值
     import argparse
     parser = argparse.ArgumentParser(description='Asset Import Workflow')
@@ -516,11 +514,6 @@ def main():
     file_name = args.file
 
     results = workflow.execute_batch(file_name)
-    
-    # 输出结果统计
-    success_count = sum(1 for r in results if r['success'])
-    total_count = len(results)
-    logger.info(f"处理完成: 成功 {success_count}/{total_count}")
     
     return results
 
