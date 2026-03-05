@@ -18,22 +18,33 @@ import os
 import uuid
 import hashlib
 from typing import List, Optional
+import logging
+
+# 加载环境变量
+load_dotenv()
+
+# 配置日志
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 
 # 配置区域
 class Config:
     # 区块链存证服务配置
-    EVIDENCE_BASE_URL = "http://172.22.152.154:8090"
-    CHAIN_ID = "FELGN5IWTZB4"
+    EVIDENCE_BASE_URL = os.getenv("EVIDENCE_BASE_URL", "")
+    CHAIN_ID = os.getenv("CHAIN_ID", "")
 
     # 存证服务认证信息
-    EVIDENCE_API_KEY = "058b6995c95e45a2bcd2f189a2334ad1"
-    EVIDENCE_IDENTITY_ID = "FCAVLRLUFYTC"
-    EVIDENCE_COOKIE = "Secure"
+    EVIDENCE_API_KEY = os.getenv("EVIDENCE_API_KEY", "")
+    EVIDENCE_IDENTITY_ID = os.getenv("EVIDENCE_IDENTITY_ID", "")
+    EVIDENCE_COOKIE = os.getenv("EVIDENCE_COOKIE", "")
 
     # 库存导入服务配置
-    INVENTORY_BASE_URL = "http://47.92.193.45:31880"
-    INVENTORY_TOKEN= "eyJ0eXBlIjoiSldUIiwiYWxnIjoiSFMyNTYifQ.eyJyb2xlIjoiYWRtaW4iLCJ1c2VySWQiOiIxIiwic3ViIjoiYWRtaW4iLCJpYXQiOjE3NzI2MDU3OTEsImV4cCI6MTc3Nzc4OTc5MSwibmJmIjoxNzcyNjA1NzkxfQ.8ccQ-ciUlSXudjpA2_TXC-p0zT5lezowha37fAo2YDs"
+    INVENTORY_BASE_URL = os.getenv("INVENTORY_BASE_URL", "")
+    INVENTORY_TOKEN = os.getenv("INVENTORY_TOKEN", "")
 
     # Excel模板列配置
     EXCEL_COLUMNS = [
@@ -45,7 +56,12 @@ class Config:
     ]
 
     EPC_LENGTH = 64
-    OUTPUT_DIR = "./output"
+    OUTPUT_DIR = os.getenv("OUTPUT_DIR", "./output")
+    
+    # 批处理配置
+    BATCH_SIZE = int(os.getenv("BATCH_SIZE", "10"))  # 每批处理的资产数量
+    REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "30"))  # 请求超时时间（秒）
+    MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))  # 最大重试次数
 
 
 # 工具函数
@@ -66,13 +82,14 @@ class Utils:
     def ensure_dir(directory: str):
         """确保目录存在"""
         if not os.path.exists(directory):
-            os.makedirs(directory)
+            os.makedirs(directory, exist_ok=True)
 
     @staticmethod
     def generate_filename(prefix: str = "asset_import") -> str:
         """生成带时间戳的文件名"""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         return f"{prefix}_{timestamp}.xlsx"
+
 
 # 存证服务类
 class EvidenceService:
@@ -91,7 +108,6 @@ class EvidenceService:
             "Content-Type": "application/json;charset=UTF-8",
             "Authorization": f"Bearer {api_key}",
             "Identity-Id": identity_id,
-            # "Idempotency-Key": str(uuid.uuid4())
         }
 
         if cookie:
@@ -108,39 +124,53 @@ class EvidenceService:
             "record": record_data
         }
 
-        headers = self.headers
+        headers = self.headers.copy()
         headers["Idempotency-Key"] = str(uuid.uuid4())
 
-        try:
-            response = requests.post(url, headers=self.headers, json=payload, timeout=30)
-            if response.status_code == 401:
+        retry_count = 0
+        while retry_count < Config.MAX_RETRIES:
+            try:
+                logger.info(f"正在提交存证数据: {biz_trace_id}")
+                response = requests.post(url, headers=headers, json=payload, timeout=Config.REQUEST_TIMEOUT)
+                
+                if response.status_code == 401:
+                    logger.error("认证失败，请检查API密钥和身份ID")
+                    return None
+
+                response.raise_for_status()
+                result = response.json()
+
+                if result.get("code") == 200 or result.get("code") == "200":
+                    data = result.get("data", {})
+                    chain_tx_data = data.get("chainTxData", {})
+                    logger.info(f"  - 记录ID: {data.get('id', 'N/A')}")
+                    logger.info(f"  - txHash: {chain_tx_data.get('txHash', 'N/A')}")
+                    logger.info(f"  - 区块高度：{chain_tx_data.get('blockNumber', 'N/A')}")
+
+                    return data
+                else:
+                    logger.error(f"存证提交失败: {result}")
+                    return None
+
+            except requests.exceptions.RequestException as e:
+                retry_count += 1
+                logger.warning(f"请求失败，正在进行第 {retry_count} 次重试: {str(e)}")
+                if retry_count >= Config.MAX_RETRIES:
+                    logger.error(f"达到最大重试次数，存证提交失败: {str(e)}")
+                    return None
+            except json.JSONDecodeError as e:
+                logger.error(f"响应解析失败: {str(e)}")
                 return None
 
-            response.raise_for_status()
-            result = response.json()
+        return None
 
-            if result.get("code") == 200 or result.get("code") == "200":
-                data = result.get("data", {})
-                chain_tx_data = data.get("chainTxData", {})
-                print(f"    - 记录ID: {data.get('id', 'N/A')}")
-                print(f"    - txHash: {chain_tx_data.get('txHash', 'N/A')}")
-                print(f"    - 区块高度：{chain_tx_data.get('blockNumber', 'N/A')}")
-
-                return data
-            else:
-                return None
-
-        except requests.exceptions.RequestException as e:
-            return None
-        except json.JSONDecodeError as e:
-            return None
 
 # Excel处理类
 class ExcelHandler:
     @staticmethod
     def create_asset_excel(asset_list: List[dict],
                            output_file: str,
-                           sheet_name: str = "资产清单列表") -> str:
+                           sheet_name: str = "资产清单列表"):
 
         Utils.ensure_dir(os.path.dirname(output_file) if os.path.dirname(output_file) else ".")
 
@@ -155,7 +185,7 @@ class ExcelHandler:
             cell.font = openpyxl.styles.Font(bold=True)
             cell.fill = openpyxl.styles.PatternFill(start_color="DDDDDD", end_color="DDDDDD", fill_type="solid")
 
-        # 写入数据 todo asset_list数据
+        # 写入数据
         for row_idx, asset in enumerate(asset_list, 2):
             ws.cell(row=row_idx, column=1, value=row_idx - 1)
             ws.cell(row=row_idx, column=2, value=asset.get("asset_no", ""))
@@ -163,7 +193,9 @@ class ExcelHandler:
             ws.cell(row=row_idx, column=4, value=asset.get("spec_model", ""))
             epc = asset.get("epc", "")
             ws.cell(row=row_idx, column=5, value=epc.lower() if epc else "")
-            ws.cell(row=row_idx, column=6, value=asset.get("position", ""))
+            # 如果有位置信息，也写入（对应原代码中的第6列）
+            if "position" in asset:
+                ws.cell(row=row_idx, column=6, value=asset.get("position", ""))
 
         # 设置列宽
         column_widths = [8, 66, 25, 20, 40, 20]
@@ -185,8 +217,8 @@ class ExcelHandler:
                 cell.border = thin_border
 
         wb.save(output_file)
-        print(f"✓ Excel文件已生成：{output_file}")
-        print(f"  - 记录数：{len(asset_list)}")
+        logger.info(f"✓ Excel文件已生成：{output_file}")
+        logger.info(f"  - 记录数：{len(asset_list)}")
         return output_file
 
     @staticmethod
@@ -229,6 +261,7 @@ class ExcelHandler:
         except Exception as e:
             return (False, [f"文件读取错误：{str(e)}"])
 
+
 # 库存导入服务类
 class InventoryService:
     def __init__(self, base_url: str, bearer_token: str):
@@ -245,61 +278,72 @@ class InventoryService:
 
         # 检查文件是否存在
         if not os.path.exists(file_path):
-            print(f"✗ 文件不存在：{file_path}")
+            logger.error(f"✗ 文件不存在：{file_path}")
             return None
 
-        try:
-            with open(file_path, 'rb') as f:
-                files = {
-                    'file': (
-                        os.path.basename(file_path),
-                        f,
-                        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        retry_count = 0
+        while retry_count < Config.MAX_RETRIES:
+            try:
+                with open(file_path, 'rb') as f:
+                    files = {
+                        'file': (
+                            os.path.basename(file_path),
+                            f,
+                            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                        )
+                    }
+
+                    # 调用接口
+                    logger.info(f"正在上传文件到库存服务: {file_path}")
+                    response = requests.post(
+                        url,
+                        headers=self.headers,
+                        files=files,
+                        timeout=60
                     )
-                }
 
-                # 调用接口
-                response = requests.post(
-                    url,
-                    headers=self.headers,
-                    files=files,
-                    timeout=60
-                )
+                    # 处理401认证错误
+                    if response.status_code == 401:
+                        logger.error("库存服务认证失败")
+                        return None
 
-                # 处理401认证错误
-                if response.status_code == 401:
-                    return None
+                    # 处理其他错误状态码
+                    if response.status_code >= 400:
+                        try:
+                            error_data = response.json()
+                            logger.error(f"  → 错误信息：{error_data}")
+                        except:
+                            logger.error(f"  → 响应内容：{response.text[:500]}")
+                        return None
 
-                # 处理其他错误状态码
-                if response.status_code >= 400:
+                    # 解析成功响应
                     try:
-                        error_data = response.json()
-                        print(f"  → 错误信息：{error_data}")
-                    except:
-                        print(f"  → 响应内容：{response.text[:500]}")
+                        result = response.json()
+                        logger.info("文件上传成功")
+                        return result
+                    except json.JSONDecodeError:
+                        return {"status": "SUCCESS", "statusCode": response.status_code}
+
+            except requests.exceptions.ConnectionError as e:
+                retry_count += 1
+                logger.warning(f"连接失败，正在进行第 {retry_count} 次重试: {str(e)}")
+                if retry_count >= Config.MAX_RETRIES:
+                    logger.error(f"  ✗ 连接失败：无法连接到 {self.base_url}")
+                    logger.error(f"     请确认服务是否已启动")
+                    logger.error(f"     错误详情：{str(e)}")
                     return None
+            except requests.exceptions.Timeout as e:
+                logger.error(f"  ✗ 请求超时：{str(e)}")
+                return None
+            except requests.exceptions.RequestException as e:
+                logger.error(f"  ✗ 接口调用异常：{str(e)}")
+                return None
+            except Exception as e:
+                logger.error(f"  ✗ 未知错误：{str(e)}")
+                return None
 
-                # 解析成功响应
-                try:
-                    result = response.json()
-                    return result
-                except json.JSONDecodeError:
-                    return {"status": "SUCCESS", "statusCode": response.status_code}
+        return None
 
-        except requests.exceptions.ConnectionError as e:
-            print(f"  ✗ 连接失败：无法连接到 {self.base_url}")
-            print(f"     请确认服务是否已启动")
-            print(f"     错误详情：{str(e)}")
-            return None
-        except requests.exceptions.Timeout as e:
-            print(f"  ✗ 请求超时：{str(e)}")
-            return None
-        except requests.exceptions.RequestException as e:
-            print(f"  ✗ 接口调用异常：{str(e)}")
-            return None
-        except Exception as e:
-            print(f"  ✗ 未知错误：{str(e)}")
-            return None
 
 # 主流程类
 class AssetImportWorkflow:
@@ -380,7 +424,6 @@ class AssetImportWorkflow:
                         if value is not None:
                             asset_data[target_field] = value
 
-
                 asset_list.append(asset_data)
 
         wb.close()
@@ -389,9 +432,9 @@ class AssetImportWorkflow:
         evidence_results = []
 
         # 步骤1: 批量提交存证
-        print("\n【步骤1】批量提交区块链存证")
+        logger.info("\n【步骤1】批量提交区块链存证")
         for idx, asset in enumerate(asset_list, 1):
-            print(f"\n  处理资产 {idx}/{len(asset_list)}...")
+            logger.info(f"\n  处理资产 {idx}/{len(asset_list)}...")
 
             biz_trace_id = f"BATCH-{datetime.now().strftime('%Y%m%d')}-{idx:04d}"
             evidence_record = {
@@ -412,7 +455,7 @@ class AssetImportWorkflow:
             evidence_results.append(result)
 
         # 步骤2: 生成Excel
-        print("\n【步骤2】生成Excel文件")
+        logger.info("\n【步骤2】生成Excel文件")
         excel_data = []
 
         for idx, (asset, evidence) in enumerate(zip(asset_list, evidence_results)):
@@ -437,7 +480,7 @@ class AssetImportWorkflow:
         ExcelHandler.create_asset_excel(excel_data, output_file)
 
         # 步骤3: 调用库存导入接口
-        print("\n【步骤3】调用库存导入服务/inventory/importFile接口")
+        logger.info("\n【步骤3】调用库存导入服务/inventory/importFile接口")
         import_result = self.inventory_service.import_file(output_file)
 
         # 汇总结果
@@ -458,12 +501,20 @@ class AssetImportWorkflow:
                 })
         return results
 
+
 def main():
-    load_dotenv()
+    # 从命令行参数获取输入文件名，如果未提供则使用默认值
+    import argparse
+    parser = argparse.ArgumentParser(description='Asset Import Workflow')
+    parser.add_argument('--file', '-f', type=str, default='test.xlsx', help='Input Excel file name')
+    args = parser.parse_args()
+    
+    logger.info("开始执行资产导入工作流")
     workflow = AssetImportWorkflow()
-    file_name = "test.xlsx"
+    file_name = args.file
 
     results = workflow.execute_batch(file_name)
+    
     return results
 
 

@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  asset-import-service:
+    build: .
+    container_name: asset-import-service
+    restart: unless-stopped
+    environment:
+      # 区块链存证服务配置
+      - EVIDENCE_BASE_URL=${EVIDENCE_BASE_URL:-http://172.22.152.154:8090}
+      - CHAIN_ID=${CHAIN_ID:-FELGN5IWTZB4}
+      
+      # 存证服务认证信息
+      - EVIDENCE_API_KEY=${EVIDENCE_API_KEY:-058b6995c95e45a2bcd2f189a2334ad1}
+      - EVIDENCE_IDENTITY_ID=${EVIDENCE_IDENTITY_ID:-FCAVLRLUFYTC}
+      - EVIDENCE_COOKIE=${EVIDENCE_COOKIE:-Secure}
+      
+      # 库存导入服务配置
+      - INVENTORY_BASE_URL=${INVENTORY_BASE_URL:-http://47.92.193.45:31880}
+      - INVENTORY_TOKEN=${INVENTORY_TOKEN:-eyJ0eXBlIjoiSldUIiwiYWxnIjoiSFMyNTYifQ.eyJyb2xlIjoiYWRtaW4iLCJ1c2VySWQiOiIxIiwic3ViIjoiYWRtaW4iLCJpYXQiOjE3NzI2MDU3OTEsImV4cCI6MTc3Nzc4OTc5MSwibmJmIjoxNzcyNjA1NzkxfQ.8ccQ-ciUlSXudjpA2_TXC-p0zT5lezowha37fAo2YDs}
+      
+      # 应用配置
+      - OUTPUT_DIR=${OUTPUT_DIR:-./output}
+      - BATCH_SIZE=${BATCH_SIZE:-10}
+      - REQUEST_TIMEOUT=${REQUEST_TIMEOUT:-30}
+      - MAX_RETRIES=${MAX_RETRIES:-3}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      
+    volumes:
+      # 挂载输入文件目录
+      - ${INPUT_DIR:-./input}:/app/input:ro
+      # 挂载输出目录
+      - ${OUTPUT_DIR:-./output}:/app/output:rw
+      # 挂载配置文件（可选）
+      - ./.env:/app/.env:ro
+      
+    # 如果需要定时任务，可以启用以下配置
+    # command: >
+    #   sh -c "python main.py --file /app/input/${INPUT_FILE:-test.xlsx}"
+      
+    networks:
+      - asset-import-network
+
+networks:
+  asset-import-network:
+    driver: bridge
